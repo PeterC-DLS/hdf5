@@ -22,7 +22,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        ARCH: ["x86_64", "aarch64"]
+        ARCH: [aarch64] # [x86_64, aarch64]
         PLAT: ["2014"]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
@@ -35,17 +35,18 @@ jobs:
         with:
           platforms: arm64
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug_enabled }}
+        # if:  ${{ failure() }}
+        with:
+          limit-access-to-actor: true
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       # Use docker image of Centos 6 or 7 with some devel packages as defined in PEP571 and PEP599
       - name: Make Linux bindings
         run: |
           docker run --rm --env="ARCH=${{ matrix.ARCH }}" --env="PLAT_OS=linux" --volume $(pwd):/io ghcr.io/diamondlightsource/manylinux-dls-${{ matrix.PLAT }}_${{ matrix.ARCH }}:latest /bin/bash /io/releng/build_linux_bindings.sh
-
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        if:  ${{ failure() }}
-        with:
-          limit-access-to-actor: true
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-artifact@v3
         with:

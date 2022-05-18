@@ -10,10 +10,19 @@ export CMAKE=cmake3
 
 cd /io
 
+if [ $ARCH == 'x86_64' ]; then
+    # test for avx2 
+    set +e
+    cat /proc/cpuinfo | grep -q avx2
+    if [ $? -eq 1 ]; then
+        export DONT_TEST_PLUGINS=yes
+    fi
+    set -e
+fi
 ./releng/build_java_bindings.sh
 
 
-if [ $ARCH == 'x64_64' ]; then
+if [ $ARCH == 'x86_64' ]; then
     export PLAT_OS=win32
 
     # Set up cross-compiler environment

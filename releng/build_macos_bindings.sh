@@ -19,6 +19,13 @@ export JDKDIR=$JAVA_HOME_11_X64
 export PLAT_OS=macos
 export ARCH=x86_64
 
+# test for avx2
+set +e
+sysctl -n machdep.cpu.leaf7_features | grep -q AVX2
+if [ $? -eq 1 ]; then
+    export DONT_TEST_PLUGINS=yes
+fi
+set -e
 ./releng/build_java_bindings.sh
 X86_DEST=$DEST_DIR/*/$PLAT_OS/$ARCH
 
