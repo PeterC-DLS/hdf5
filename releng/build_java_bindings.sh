@@ -1,7 +1,10 @@
 #!/bin/bash
 set -e -x
 
-# docker run -it -v $(pwd):/io:Z ghcr.io/diamondlightsource/manylinux-dls-2014_x86_64:latest /bin/bash /releng/build_linux_bindings.sh
+# docker run -it -env="ARCH=x86_64" --env="PLAT_OS=linux" -v $(pwd):/io:Z ghcr.io/diamondlightsource/manylinux-dls-2014_x86_64:latest /bin/bash /releng/build_linux_bindings.sh
+
+# need to define where other source is checked out and built (BASE_DIR)
+# and where artifacts should be placed (DEST_DIR)
 
 # define TESTCOMP to test compression (takes a long time)
 
@@ -24,7 +27,11 @@ BS_BRANCH=use-hdf5-memory-calls
 
 case $ARCH in
   aarch64)
-    GLOBAL_CFLAGS="-fPIC -O3 -march=armv8-a"
+    if [ $PLAT_OS == 'macos' ]; then
+      GLOBAL_CFLAGS="-fPIC -O3 -march=armv8-a"
+    else
+      GLOBAL_CFLAGS="-fPIC -O3"
+    fi
     ;;
   x86_64|*)
     GLOBAL_CFLAGS="-fPIC -O3 -msse4 -mavx2"
@@ -43,13 +50,15 @@ case $PLAT_OS in
     ;;
 esac
 
+CHECKOUT_DIR=$PWD
+
 JBIN=$(readlink -f `which java`)
 export JDKDIR=$(dirname $(dirname $(dirname $JBIN)))
 
-MS=/build/src
-MY=/build/opt/$PLAT_OS
+MS=$BASE_DIR/build/src
+export MY=$BASE_DIR/build/opt/$PLAT_OS
 MA=$MY/include,$MY/lib
-H5=/build/hdf5/$PLAT_OS
+export H5=$BASE_DIR/build/hdf5/$PLAT_OS
 
 mkdir -p $MS
 mkdir -p $MY
@@ -97,7 +106,6 @@ popd
 download_check_extract_pushd lz4-$LZ4_VER v${LZ4_VER}.tar.gz $LZ4_CHK "https://github.com/lz4/lz4/archive"
 make clean
 if [ -n "$TESTCOMP" ]; then
-    yum install -y python34
     make CFLAGS="$GLOBAL_CFLAGS" PREFIX=$MY test
 fi
 make CFLAGS="$GLOBAL_CFLAGS" PREFIX=$MY install
@@ -124,15 +132,14 @@ rm -f $MY/lib/libzstd.${LIBEXT}*
 popd
 
 
-yum install -y cmake3
 
 download_check_extract_pushd c-blosc-$CB_VER v${CB_VER}.tar.gz $CB_CHK "https://github.com/Blosc/c-blosc/archive/refs/tags"
 mkdir -p build && cd build
 #CFLAGS="$GLOBAL_CFLAGS -DNDEBUG"
 if [ $ARCH == 'x64_64' ]; then
-    CFLAGS="$GLOBAL_CFLAGS" cmake3 -DCMAKE_INSTALL_PREFIX=$MY -DPREFER_EXTERNAL_LZ4=ON -DPREFER_EXTERNAL_ZLIB=ON -DPREFER_EXTERNAL_ZSTD=ON -DZLIB_ROOT=$MY -DLZ4_ROOT=$MY -DZstd_ROOT=$MY ..
+    CFLAGS="$GLOBAL_CFLAGS" $CMAKE -DCMAKE_INSTALL_PREFIX=$MY -DPREFER_EXTERNAL_LZ4=ON -DPREFER_EXTERNAL_ZLIB=ON -DPREFER_EXTERNAL_ZSTD=ON -DZLIB_ROOT=$MY -DLZ4_ROOT=$MY -DZstd_ROOT=$MY ..
 else
-    CFLAGS="$GLOBAL_CFLAGS" cmake3 -DCMAKE_INSTALL_PREFIX=$MY -DPREFER_EXTERNAL_LZ4=ON -DPREFER_EXTERNAL_ZLIB=ON -DPREFER_EXTERNAL_ZSTD=ON -DZLIB_ROOT=$MY -DLZ4_ROOT=$MY -DZstd_ROOT=$MY -DDEACTIVATE_AVX2=ON ..
+    CFLAGS="$GLOBAL_CFLAGS" $CMAKE -DCMAKE_INSTALL_PREFIX=$MY -DPREFER_EXTERNAL_LZ4=ON -DPREFER_EXTERNAL_ZLIB=ON -DPREFER_EXTERNAL_ZSTD=ON -DZLIB_ROOT=$MY -DLZ4_ROOT=$MY -DZstd_ROOT=$MY -DDEACTIVATE_AVX2=ON ..
 fi
 make clean
 if [ -n "$TESTCOMP" ]; then
@@ -144,17 +151,22 @@ popd
 
 
 # use checked out version; no need to unpack
-pushd /io
+pushd $CHECKOUT_DIR
+
+if [ ! -x "configure" ]; then
+    ./autogen.sh
+fi
 
 mkdir -p hdf5-build-$PLAT_OS
 pushd hdf5-build-$PLAT_OS
-CFLAGS=$GLOBAL_CFLAGS /io/configure --prefix=$H5 --enable-shared=yes --disable-hl --enable-threadsafe --with-zlib=$MA --with-pic=yes --enable-optimization=-O2 --enable-unsupported --enable-java
+CFLAGS=$GLOBAL_CFLAGS ../configure --prefix=$H5 --enable-shared=yes --disable-hl --enable-threadsafe --with-zlib=$MA --with-pic=yes --enable-optimization=-O2 --enable-unsupported --enable-java
 if [ -n "$TESTCOMP" ]; then
     # not necessary on GH actions as runner is not root
     if false; then
         # remove expected exception as root can write into read-only files so no exception gets thrown (see junit-failure.txt)
-        mv /io/java/test/TestH5Fbasic.java /io/java/test/TestH5Fbasic.orig
-        awk '/testH5Fopen_read_only/{sub(/Test([^\n]*)/, "Test", last)} NR>1 {print last} {last=$0} END {print last}' /io/java/test/TestH5Fbasic.orig > /io/java/test/TestH5Fbasic.java
+        OLD_FILE=$CHECKOUT_DIR/java/test/TestH5Fbasic
+        mv ${OLD_FILE}.java ${OLD_FILE}.orig
+        awk '/testH5Fopen_read_only/{sub(/Test([^\n]*)/, "Test", last)} NR>1 {print last} {last=$0} END {print last}' ${OLD_FILE}.orig > ${OLD_FILE}.java
     fi
     make check
 fi
@@ -162,35 +174,32 @@ make install
 popd
 
 
-
 JARFILE="$H5/lib/jarhdf5-*.jar"
 VERSION=`basename $JARFILE | sed -e 's/jarhdf5-\(.*\)\.jar/\1/g'`
 
-DEST=/io/dist/$VERSION/$PLAT_OS/$ARCH
+DEST=$DEST_DIR/$VERSION/$PLAT_OS/$ARCH
 mkdir -p $DEST
 
 cp $JARFILE $DEST
 cp -H $H5/lib/libhdf5.${LIBEXT} $DEST
 cp $H5/lib/libhdf5_java.${LIBEXT} $DEST
-cp $H5/lib/libhdf5.setting $DEST
+cp $H5/lib/libhdf5.settings $DEST
 
 cd $MS
 
-if [ -d HDF5-External-Filter-Plugins.git ]; then
-    yum install -y git
+if [ ! -d HDF5-External-Filter-Plugins.git ]; then
     # checkout plugins
-    git clone --depth 2 -b $FP_BRANCH git@github.com:DiamondLightSource/HDF5-External-Filter-Plugins.git HDF5-External-Filter-Plugins.git
+    git clone --depth 2 -b $FP_BRANCH https://github.com/DiamondLightSource/HDF5-External-Filter-Plugins.git HDF5-External-Filter-Plugins.git
 fi
 pushd HDF5-External-Filter-Plugins.git
 
-if [ -d bitshuffle.git ]; then
-    yum install -y git
+if [ ! -d bitshuffle.git ]; then
     # checkout plugins
-    git clone --depth 2 -b $BS_BRANCH git@github.com:DiamondLightSource/bitshuffle.git bitshuffle.git
+    git clone --depth 2 -b $BS_BRANCH https://github.com/DiamondLightSource/bitshuffle.git bitshuffle.git
 fi
 
-make -d Makefile.dls MY=/build/opt H5=/build/hdf5 TGT_OS=$PLAT_OS TGT_ARCH=$ARCH clean
-make -d Makefile.dls MY=/build/opt H5=/build/hdf5 TGT_OS=$PLAT_OS TGT_ARCH=$ARCH
+make -f Makefile.dls TGT_OS=$PLAT_OS TGT_ARCH=$ARCH clean
+make -f Makefile.dls TGT_OS=$PLAT_OS TGT_ARCH=$ARCH
 if [ -z "$DONT_TEST_PLUGINS" ]; then
     pushd tests
     . check_plugins.sh
