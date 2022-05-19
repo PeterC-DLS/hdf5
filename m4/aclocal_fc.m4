@@ -406,37 +406,21 @@ AC_LANG_POP([Fortran])
 
 AC_DEFUN([PAC_FC_LDBL_DIG],[
 AC_MSG_CHECKING([maximum decimal precision for C])
-  AC_LANG_CONFTEST([
-      AC_LANG_PROGRAM([
-                #include <float.h>
-                #include <stdio.h>
-                #define CHECK_FLOAT128 $ac_cv_sizeof___float128
-                #if CHECK_FLOAT128!=0
-                # if $HAVE_QUADMATH!=0
-                #include <quadmath.h>
-                # endif
-                # ifdef FLT128_DIG
-                #define C_FLT128_DIG FLT128_DIG
-                # else
+AC_COMPUTE_INT(LDBL_DIG, [__STDC_VERSION__ >= 199901L ? DECIMAL_DIG : LDBL_DIG],
+               [#include <float.h>
+                #if $ac_cv_sizeof___float128 && $HAVE_QUADMATH
+                #  include <quadmath.h>
+                #endif], [AC_MSG_ERROR([C program fails to build or run!])])
+AC_COMPUTE_INT(FLT128_DIG, [C_FLT128_DIG],
+               [#include <float.h>
                 #define C_FLT128_DIG 0
-                # endif
-                #else
-                #define C_FLT128_DIG 0
-                #endif
-                #if defined (__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
-                #define C_LDBL_DIG DECIMAL_DIG
-                #else
-                #define C_LDBL_DIG LDBL_DIG
-                #endif
-                ],[[
-                  fprintf(stderr, "%d\n%d\n", C_LDBL_DIG, C_FLT128_DIG);
-                ]])
-        ])
-        AC_RUN_IFELSE([],[
-            LDBL_DIG=$(./conftest$EXEEXT 2>&1 | sed -n '1p')
-            FLT128_DIG=$(./conftest$EXEEXT 2>&1 | sed -n '2p')
-        ],[
-            AC_MSG_ERROR([C program fails to build or run!])
-        ],[])
+                #if $ac_cv_sizeof___float128 && $HAVE_QUADMATH
+                #  include <quadmath.h>
+                #  ifdef FLT128_DIG
+                #    undef C_FLT128_DIG
+                #    define C_FLT128_DIG FLT128_DIG
+                #  else
+                #  endif
+                #endif], [AC_MSG_ERROR([C program fails to build or run!])])
 ])
 
